@@ -1,283 +1,468 @@
 
-import pygame
-import random
 import os
+import random
 import math
 import wave
 import struct
-import io
 
-pygame.init()
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.core.audio import SoundLoader
+from kivy.core.text import Label as CoreLabel
+from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.uix.widget import Widget
+from kivy.utils import get_color_from_hex
 
-# Звук
-eat_sound = None
 
-try:
-    if not pygame.mixer.get_init():
-        pygame.mixer.init()
+class SnakeGame(Widget):
 
-    sample_rate = 22050
-    duration = 0.15
-    sound_data = io.BytesIO()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    with wave.open(sound_data, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
+        self.state = "menu"
+        self.score = 0
+        self.best = 0
 
-        samples = []
-        for i in range(int(sample_rate * duration)):
-            t = i / sample_rate
-            volume = 1 - t / duration
-            value = int(
-                10000 * volume * math.sin(2 * math.pi * 880 * t)
+        self.cols = 18
+        self.snake = []
+        self.direction = (1, 0)
+        self.next_direction = (1, 0)
+        self.food = (10, 9)
+
+        self.timer = None
+        self.eat_sound = None
+
+        self.bind(size=self.redraw, pos=self.redraw)
+
+    def on_start_game(self):
+        try:
+            path = os.path.join(
+                App.get_running_app().user_data_dir,
+                "best.txt"
             )
-            samples.append(struct.pack("<h", value))
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    self.best = int(f.read())
+        except:
+            self.best = 0
 
-        wav.writeframes(b"".join(samples))
+        self.create_sound()
+        self.redraw()
 
-    sound_data.seek(0)
-    eat_sound = pygame.mixer.Sound(file=sound_data)
-
-except Exception:
-    eat_sound = None
-
-W, H = 400, 680
-screen = pygame.display.set_mode((W, H))
-pygame.display.set_caption("VAAAAAVEN SNAKE 2.3")
-
-clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, 32)
-big = pygame.font.SysFont(None, 45)
-
-GREEN = (40, 230, 100)
-WHITE = (255, 255, 255)
-BLUE = (30, 130, 255)
-DARK = (15, 20, 35)
-
-# Сохранение рекорда
-BEST_FILE = "vavaven_best.txt"
-
-def load_best():
-    try:
-        with open(BEST_FILE, "r") as file:
-            return int(file.read())
-    except:
-        return 0
-
-def save_best():
-    try:
-        with open(BEST_FILE, "w") as file:
-            file.write(str(best))
-    except:
-        pass
-
-best = load_best()
-score = 0
-state = "menu"
-
-play_button = pygame.Rect(100, 330, 200, 65)
-restart_button = pygame.Rect(80, 350, 240, 60)
-menu_button = pygame.Rect(80, 430, 240, 60)
-
-buttons = {
-    "UP": pygame.Rect(155, 510, 90, 45),
-    "DOWN": pygame.Rect(155, 610, 90, 45),
-    "LEFT": pygame.Rect(55, 560, 90, 45),
-    "RIGHT": pygame.Rect(255, 560, 90, 45)
-}
-
-def reset_game():
-    global snake, direction, food, score, timer
-
-    snake = [(200, 270), (180, 270), (160, 270)]
-    direction = (20, 0)
-    score = 0
-    timer = 0
-    food = new_food()
-
-def new_food():
-    while True:
-        p = (
-            random.randrange(0, 400, 20),
-            random.randrange(70, 470, 20)
-        )
-        if p not in snake:
-            return p
-
-def draw_button(rect, label, color=BLUE):
-    pygame.draw.rect(screen, color, rect, border_radius=15)
-    pygame.draw.rect(screen, WHITE, rect, 2, border_radius=15)
-
-    text = font.render(label, True, WHITE)
-    screen.blit(text, text.get_rect(center=rect.center))
-
-def draw_game():
-    screen.fill(DARK)
-
-    title = font.render("VAAAAAVEN SNAKE 2.3", True, GREEN)
-    screen.blit(title, (15, 20))
-
-    pygame.draw.rect(screen, (25, 35, 55), (0, 70, 400, 400))
-
-    # Сетка
-    for x in range(0, 400, 20):
-        pygame.draw.line(
-            screen, (35, 45, 65),
-            (x, 70), (x, 470)
-        )
-
-    for y in range(70, 470, 20):
-        pygame.draw.line(
-            screen, (35, 45, 65),
-            (0, y), (400, y)
-        )
-
-    pygame.draw.rect(screen, WHITE, (0, 70, 400, 400), 2)
-
-    # Еда
-    pygame.draw.circle(
-        screen, (255, 70, 70),
-        (food[0] + 10, food[1] + 10), 9
-    )
-
-    # Змейка
-    for i, part in enumerate(snake):
-        color = GREEN if i == 0 else (20, 180, 90)
-
-        pygame.draw.rect(
-            screen, color,
-            (*part, 20, 20),
-            border_radius=6
-        )
-
-    # Глаза
-    hx, hy = snake[0]
-
-    pygame.draw.circle(screen, WHITE, (hx + 14, hy + 6), 2)
-    pygame.draw.circle(screen, WHITE, (hx + 14, hy + 14), 2)
-
-    text = font.render("SCORE: " + str(score), True, WHITE)
-    screen.blit(text, (10, 475))
-
-    text = font.render("BEST: " + str(best), True, GREEN)
-    screen.blit(text, (260, 475))
-
-    for name, rect in buttons.items():
-        draw_button(rect, name)
-
-def start_game():
-    global state
-    reset_game()
-    state = "playing"
-
-reset_game()
-
-running = True
-
-while running:
-    dt = clock.tick(60)
-
-    for event in pygame.event.get():
-
-        if event.type == pygame.QUIT:
-            running = False
-
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pos = event.pos
-
-            if state == "menu":
-                if play_button.collidepoint(pos):
-                    start_game()
-
-            elif state == "playing":
-                moves = {
-                    "UP": (0, -20),
-                    "DOWN": (0, 20),
-                    "LEFT": (-20, 0),
-                    "RIGHT": (20, 0)
-                }
-
-                for name, rect in buttons.items():
-                    if rect.collidepoint(pos):
-                        new_dir = moves[name]
-
-                        if new_dir != (
-                            -direction[0], -direction[1]
-                        ):
-                            direction = new_dir
-
-            elif state == "over":
-                if restart_button.collidepoint(pos):
-                    start_game()
-
-                elif menu_button.collidepoint(pos):
-                    state = "menu"
-
-    if state == "playing":
-        timer += dt
-
-        if timer >= 140:
-            timer = 0
-
-            head = (
-                snake[0][0] + direction[0],
-                snake[0][1] + direction[1]
+    def create_sound(self):
+        try:
+            path = os.path.join(
+                App.get_running_app().user_data_dir,
+                "eat.wav"
             )
 
-            if (head[0] < 0 or head[0] >= 400 or
-                head[1] < 70 or head[1] >= 470):
-                state = "over"
+            if not os.path.exists(path):
+                with wave.open(path, "w") as f:
+                    f.setparams(
+                        (1, 2, 22050, 0, "NONE", "not compressed")
+                    )
 
-            elif head in snake[:-1] and head != food:
-                state = "over"
+                    samples = []
+                    for i in range(2205):
+                        t = i / 22050
+                        value = int(
+                            10000 *
+                            math.sin(2 * math.pi * 700 * t) *
+                            (1 - t / 0.1)
+                        )
+                        samples.append(struct.pack("<h", value))
 
-            else:
-                snake.insert(0, head)
+                    f.writeframes(b"".join(samples))
 
-                if head == food:
-                    score += 1
+            self.eat_sound = SoundLoader.load(path)
 
-                    if score > best:
-                        best = score
-                        save_best()
+        except:
+            self.eat_sound = None
 
-                    if eat_sound:
-                        eat_sound.play()
+    def save_best(self):
+        try:
+            path = os.path.join(
+                App.get_running_app().user_data_dir,
+                "best.txt"
+            )
+            with open(path, "w") as f:
+                f.write(str(self.best))
+        except:
+            pass
 
-                    food = new_food()
+    def new_game(self):
+        self.score = 0
 
+        self.snake = [
+            (5, 9),
+            (4, 9),
+            (3, 9)
+        ]
+
+        self.direction = (1, 0)
+        self.next_direction = (1, 0)
+
+        self.spawn_food()
+        self.state = "playing"
+
+        if self.timer:
+            self.timer.cancel()
+
+        self.timer = Clock.schedule_interval(
+            self.update_game, 0.14
+        )
+
+        self.redraw()
+
+    def spawn_food(self):
+        while True:
+            food = (
+                random.randint(0, self.cols - 1),
+                random.randint(0, self.cols - 1)
+            )
+
+            if food not in self.snake:
+                self.food = food
+                break
+
+    def update_game(self, dt):
+        self.direction = self.next_direction
+
+        hx, hy = self.snake[0]
+        dx, dy = self.direction
+
+        new_head = (hx + dx, hy + dy)
+
+        if (
+            new_head[0] < 0 or
+            new_head[0] >= self.cols or
+            new_head[1] < 0 or
+            new_head[1] >= self.cols
+        ):
+            self.game_over()
+            return
+
+        eating = new_head == self.food
+
+        body = self.snake if eating else self.snake[:-1]
+
+        if new_head in body:
+            self.game_over()
+            return
+
+        self.snake.insert(0, new_head)
+
+        if eating:
+            self.score += 1
+
+            if self.eat_sound:
+                try:
+                    self.eat_sound.stop()
+                    self.eat_sound.play()
+                except:
+                    pass
+
+            if self.score > self.best:
+                self.best = self.score
+                self.save_best()
+
+            self.spawn_food()
+
+        else:
+            self.snake.pop()
+
+        self.redraw()
+
+    def game_over(self):
+        self.state = "over"
+
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
+
+        self.redraw()
+
+    def change_direction(self, direction):
+        dx, dy = direction
+        old_x, old_y = self.direction
+
+        if (dx, dy) != (-old_x, -old_y):
+            self.next_direction = (dx, dy)
+
+    def draw_text(self, text, x, y, size, color=(1, 1, 1, 1)):
+        label = CoreLabel(
+            text=str(text),
+            font_size=size,
+            color=color
+        )
+
+        label.refresh()
+        texture = label.texture
+
+        Color(1, 1, 1, 1)
+
+        Rectangle(
+            texture=texture,
+            pos=(
+                x - texture.width / 2,
+                y - texture.height / 2
+            ),
+            size=texture.size
+        )
+
+    def draw_button(self, text, x, y, w, h, color):
+        Color(*color)
+        Rectangle(pos=(x, y), size=(w, h))
+
+        self.draw_text(
+            text,
+            x + w / 2,
+            y + h / 2,
+            max(16, int(h * 0.38))
+        )
+
+    def redraw(self, *args):
+        self.canvas.clear()
+
+        w = self.width
+        h = self.height
+        ox, oy = self.pos
+
+        with self.canvas:
+            Color(*get_color_from_hex("#101522"))
+            Rectangle(pos=self.pos, size=self.size)
+
+            if self.state == "menu":
+
+                self.draw_text(
+                    "VAAAAAVEN SNAKE",
+                    ox + w / 2,
+                    oy + h * 0.70,
+                    int(w * 0.075),
+                    (0.2, 1, 0.4, 1)
+                )
+
+                self.draw_text(
+                    "BEST: " + str(self.best),
+                    ox + w / 2,
+                    oy + h * 0.59,
+                    22
+                )
+
+                self.draw_button(
+                    "PLAY",
+                    ox + w * 0.22,
+                    oy + h * 0.38,
+                    w * 0.56,
+                    65,
+                    (0.1, 0.65, 0.25, 1)
+                )
+
+                return
+
+            board_size = min(w * 0.88, h * 0.53)
+            cell = board_size / self.cols
+
+            bx = ox + (w - board_size) / 2
+            by = oy + h * 0.30
+
+            self.draw_text(
+                "SCORE: " + str(self.score),
+                ox + w * 0.28,
+                oy + h * 0.91,
+                21
+            )
+
+            self.draw_text(
+                "BEST: " + str(self.best),
+                ox + w * 0.73,
+                oy + h * 0.91,
+                21
+            )
+
+            Color(*get_color_from_hex("#1B2638"))
+            Rectangle(
+                pos=(bx, by),
+                size=(board_size, board_size)
+            )
+
+            Color(0.25, 0.32, 0.4, 0.35)
+
+            for i in range(self.cols + 1):
+                Line(
+                    points=[
+                        bx + i * cell, by,
+                        bx + i * cell, by + board_size
+                    ],
+                    width=0.5
+                )
+
+                Line(
+                    points=[
+                        bx, by + i * cell,
+                        bx + board_size, by + i * cell
+                    ],
+                    width=0.5
+                )
+
+            fx, fy = self.food
+
+            Color(1, 0.15, 0.18, 1)
+
+            Ellipse(
+                pos=(
+                    bx + fx * cell + cell * 0.12,
+                    by + fy * cell + cell * 0.12
+                ),
+                size=(cell * 0.76, cell * 0.76)
+            )
+
+            for index, (sx, sy) in enumerate(self.snake):
+
+                if index == 0:
+                    Color(0.25, 1, 0.35, 1)
                 else:
-                    snake.pop()
+                    Color(0.05, 0.75, 0.22, 1)
 
-    if state == "menu":
-        screen.fill(DARK)
+                Rectangle(
+                    pos=(
+                        bx + sx * cell + 1,
+                        by + sy * cell + 1
+                    ),
+                    size=(cell - 2, cell - 2)
+                )
 
-        title = big.render("VAAAAAVEN", True, GREEN)
-        screen.blit(title, (65, 170))
+            # UP
+            self.draw_button(
+                "UP",
+                ox + w * 0.39,
+                oy + h * 0.15,
+                w * 0.22,
+                42,
+                (0.17, 0.25, 0.38, 1)
+            )
 
-        subtitle = font.render("SNAKE 2.3", True, WHITE)
-        screen.blit(subtitle, (135, 230))
+            # LEFT
+            self.draw_button(
+                "LEFT",
+                ox + w * 0.14,
+                oy + h * 0.075,
+                w * 0.22,
+                42,
+                (0.17, 0.25, 0.38, 1)
+            )
 
-        draw_button(play_button, "PLAY", GREEN)
+            # DOWN
+            self.draw_button(
+                "DOWN",
+                ox + w * 0.39,
+                oy + h * 0.075,
+                w * 0.22,
+                42,
+                (0.17, 0.25, 0.38, 1)
+            )
 
-        record = font.render(
-            "BEST SCORE: " + str(best), True, WHITE
-        )
-        screen.blit(record, (105, 430))
+            # RIGHT
+            self.draw_button(
+                "RIGHT",
+                ox + w * 0.64,
+                oy + h * 0.075,
+                w * 0.22,
+                42,
+                (0.17, 0.25, 0.38, 1)
+            )
 
-    elif state == "playing":
-        draw_game()
+            if self.state == "over":
 
-    elif state == "over":
-        draw_game()
+                Color(0, 0, 0, 0.75)
 
-        msg = big.render("GAME OVER", True, (255, 220, 0))
-        screen.blit(msg, (105, 230))
+                Rectangle(
+                    pos=(bx, by),
+                    size=(board_size, board_size)
+                )
 
-        draw_button(restart_button, "RESTART", GREEN)
-        draw_button(menu_button, "MAIN MENU")
+                self.draw_text(
+                    "GAME OVER",
+                    ox + w / 2,
+                    by + board_size * 0.60,
+                    30,
+                    (1, 0.3, 0.3, 1)
+                )
 
-    pygame.display.flip()
+                self.draw_button(
+                    "RESTART",
+                    ox + w * 0.22,
+                    by + board_size * 0.35,
+                    w * 0.56,
+                    55,
+                    (0.1, 0.65, 0.25, 1)
+                )
 
-pygame.quit()
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+
+        x, y = touch.pos
+        w, h = self.size
+        ox, oy = self.pos
+
+        rx = x - ox
+        ry = y - oy
+
+        if self.state == "menu":
+            if h * 0.35 < ry < h * 0.48:
+                self.new_game()
+            return True
+
+        if self.state == "over":
+            self.new_game()
+            return True
+
+        # UP button
+        if (
+            w * 0.39 < rx < w * 0.61 and
+            h * 0.15 < ry < h * 0.15 + 42
+        ):
+            self.change_direction((0, 1))
+            return True
+
+        # LEFT button
+        if (
+            w * 0.14 < rx < w * 0.36 and
+            h * 0.075 < ry < h * 0.075 + 42
+        ):
+            self.change_direction((-1, 0))
+            return True
+
+        # DOWN button
+        if (
+            w * 0.39 < rx < w * 0.61 and
+            h * 0.075 < ry < h * 0.075 + 42
+        ):
+            self.change_direction((0, -1))
+            return True
+
+        # RIGHT button
+        if (
+            w * 0.64 < rx < w * 0.86 and
+            h * 0.075 < ry < h * 0.075 + 42
+        ):
+            self.change_direction((1, 0))
+            return True
+
+        return True
+
+
+class VaaaavenApp(App):
+
+    def build(self):
+        self.title = "VAAAAAVEN SNAKE"
+        self.game = SnakeGame()
+        return self.game
+
+    def on_start(self):
+        self.game.on_start_game()
+
+
+if __name__ == "__main__":
+    VaaaavenApp().run()
