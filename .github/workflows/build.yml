@@ -15,14 +15,21 @@ jobs:
       - name: Download project
         uses: actions/checkout@v4
 
+      - name: Prepare cache
+        run: mkdir -p ~/.buildozer
+
       - name: Build Android APK
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          buildozer_version: stable
+        run: |
+          docker pull ghcr.io/kivy/buildozer:latest
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/home/user/hostcwd" \
+            -v "$HOME/.buildozer:/home/user/.buildozer" \
+            -w /home/user/hostcwd \
+            ghcr.io/kivy/buildozer:latest \
+            android debug
 
       - name: Save APK
         uses: actions/upload-artifact@v4
         with:
           name: VAAAAAVEN-SNAKE-APK
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
